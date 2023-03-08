@@ -1,0 +1,87 @@
+---
+title: 'Dissertation: "Exploiting Automatic Change Detection in Software Process Evolution for Organizational Learning"'
+subtitle: "Replication Package for All Results, Figures, and Tables"
+author:
+- Sebastian Hönel
+date: "Rendered on `r format(Sys.time(), '%B %d, %Y')`"
+bibliography: ../inst/REFERENCES.bib
+papersize: a4
+fontsize: 10pt
+geometry: left=2cm,right=2cm,top=2.5cm,bottom=2.5cm
+biblio-style: authoryear,maxcitenames=1,maxbibnames=99
+urlcolor: blue
+link-citations: yes
+linkcolor: blue
+header-includes:
+- \usepackage{amsmath}
+- \usepackage{amssymb}
+- \usepackage{bm}
+- \usepackage{mathtools}
+- \usepackage{xurl}
+- \usepackage[nottoc]{tocbibind}
+- \usepackage{subfig}
+
+output:
+  bookdown::pdf_document2:
+    fig_caption: yes
+    number_sections: yes
+    toc: yes
+    toc_depth: 6
+    df_print: kable
+    keep_tex: yes
+    latex_engine: pdflatex
+    citation_package: biblatex
+  md_document:
+    toc: yes
+    toc_depth: 6
+    df_print: kable
+    variant: gfm
+  html_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+    df_print: kable
+  word_document:
+    toc: yes
+    toc_depth: 6
+
+abstract: "\\noindent Here goes the abstract."
+---
+
+\newcommand*\mean[1]{\overline{#1}}
+\newcommand{\abs}[1]{\left\lvert\,#1\,\right\rvert}
+\newcommand{\norm}[1]{\left\lVert\,#1\,\right\rVert}
+\newcommand{\infdiv}[2]{#1\;\|\;#2}
+\newcommand\argmax[1]{\underset{#1}{arg\,max}}
+\newcommand\argmin[1]{\underset{#1}{arg\,min}}
+
+```{r echo=FALSE}
+# Set this to false to show R code
+PAPER_MODE <- TRUE
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = !PAPER_MODE)
+knitr::opts_chunk$set(eval = interactive())
+knitr::opts_chunk$set(dpi = 300)
+
+en_US.UTF8 <- "en_US.UTF-8"
+Sys.setenv(LANG = en_US.UTF8)
+Sys.setenv(LC_ALL = en_US.UTF8)
+Sys.setenv(LC_COLLATE = en_US.UTF8)
+Sys.setenv(LC_CTYPE = en_US.UTF8)
+Sys.setenv(LC_MONETARY = en_US.UTF8)
+Sys.setenv(LC_NUMERIC = en_US.UTF8)
+Sys.setenv(LC_TIME = en_US.UTF8)
+```
+
+# Intro
+
+Bla [@honel2023].
+
+
+# References {-}
+
+<div id="refs"></div>
