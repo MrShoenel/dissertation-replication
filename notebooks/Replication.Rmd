@@ -77,11 +77,26 @@ Sys.setenv(LC_NUMERIC = en_US.UTF8)
 Sys.setenv(LC_TIME = en_US.UTF8)
 ```
 
-# Intro
+# Preface {-}
 
-Bla [@honel2023].
+This notebook represents the replication package for my dissertation [@honel2023_phdthesis].
+Rendering this notebook will exactly reproduce all results, figures, and tables as used therein.
+Some data was taken from a technical report [@honel2023_fdtr] and reused here.
+
 
 
 # References {-}
 
 <div id="refs"></div>
+
+
+
+
+
+
+
+
+
+
+
+
