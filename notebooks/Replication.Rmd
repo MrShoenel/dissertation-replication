@@ -418,7 +418,7 @@ In Figure \ref{fig:ac-procs} we show how the automatic calibration may look afte
 In each epoch, a random process is drawn and the deviations against the process model are computed.
 
 
-```{r ac-procs, fig.width=12, fig.height=7, fig.cap="The process of Automatic Calibration, where the process model \textsf{REQ} and deviations are calibrated using random processes."}
+```{r ac-procs, fig.width=12, fig.height=7, fig.cap="The process of Automatic Calibration, where the process model \\textsf{REQ} and deviations are calibrated using random processes."}
 make_ac_plot(50)
 ```
 
