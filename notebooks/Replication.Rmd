@@ -1,5 +1,5 @@
 ---
-title: 'Dissertation: "Exploiting Automatic Change Detection in Software Process Evolution for Organizational Learning"'
+title: 'Dissertation: "Leveraging Evolutionary Changes for Software Process Quality"'
 subtitle: "Replication Package for All Results, Figures, and Tables"
 author:
 - Sebastian Hönel
@@ -8,11 +8,11 @@ bibliography: ../inst/REFERENCES.bib
 papersize: a4
 fontsize: 10pt
 geometry: left=2cm,right=2cm,top=2.5cm,bottom=2.5cm
-biblio-style: authoryear,maxcitenames=1,maxbibnames=99
 urlcolor: blue
 link-citations: yes
 linkcolor: blue
 header-includes:
+- \PassOptionsToPackage{style=authoryear,maxcitenames=1,maxbibnames=99}{biblatex}
 - \usepackage{amsmath}
 - \usepackage{amssymb}
 - \usepackage{bm}
@@ -46,7 +46,7 @@ output:
     toc: yes
     toc_depth: 6
 
-abstract: "\\noindent Here goes the abstract."
+#abstract: "\\noindent Here goes the abstract."
 ---
 
 \newcommand*\mean[1]{\overline{#1}}
@@ -56,16 +56,21 @@ abstract: "\\noindent Here goes the abstract."
 \newcommand\argmax[1]{\underset{#1}{arg\,max}}
 \newcommand\argmin[1]{\underset{#1}{arg\,min}}
 
+\listoffigures
+\listoftables
+
 ```{r echo=FALSE}
 # Set this to false to show R code
-PAPER_MODE <- TRUE
+#PAPER_MODE <- FALSE
 ```
 
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = !PAPER_MODE)
-knitr::opts_chunk$set(eval = interactive())
+library(knitr)
+#knitr::opts_chunk$set(echo = !PAPER_MODE)
+#knitr::opts_chunk$set(eval = interactive())
 knitr::opts_chunk$set(dpi = 300)
+opts_chunk$set(tidy = TRUE, tidy.opts = list(indent=2))
 
 en_US.UTF8 <- "en_US.UTF-8"
 Sys.setenv(LANG = en_US.UTF8)
@@ -77,6 +82,11 @@ Sys.setenv(LC_NUMERIC = en_US.UTF8)
 Sys.setenv(LC_TIME = en_US.UTF8)
 ```
 
+```{r echo=FALSE}
+source(file = "./helpers.R")
+```
+
+
 # Preface {-}
 
 This notebook represents the replication package for my dissertation [@honel2023_phdthesis].
@@ -84,6 +94,778 @@ Rendering this notebook will exactly reproduce all results, figures, and tables 
 Some data was taken from a technical report [@honel2023_fdtr] and reused here.
 
 
+
+
+# Source code density Expectation and Standard deviation
+
+
+```{r cache=TRUE}
+temp <- read.table("../data/360k_density.csv", header = TRUE)
+quantile(temp$Density, probs = sort(c(.065,seq(0,.7,by=.1), .72504)))
+```
+
+```{r}
+projects_sc <- readRDS(file = "../data/projects_sc.rds")$projects_sc
+```
+
+```{r}
+scd_vals <- c()
+scd_means <- c()
+use_x <- seq(from = 0, to = 1, length.out = 1e5)
+
+for (pname in names(projects_sc)) {
+	scd_vals <- c(scd_vals, projects_sc[[pname]]$SCD(use_x))
+	scd_means <- c(scd_means, cubature::cubintegrate(f = projects_sc[[pname]]$SCD, lower = 0, upper = 1)$integral)
+}
+
+`names<-`(x = c(mean(scd_vals), mean(scd_means), sd(scd_vals)), value = c("mean", "mean (integral)", "sd"))
+```
+
+
+
+
+# Automatic Calibration
+
+We want to show some preliminary results for *Automatic Calibration* in the thesis.
+Previously, we have applied the rank transform to develop a sort of scoring mechanism using joint cumulative probabilities [@ulan2018_qmio].
+Most recently, the *rank transform* of this approach has been generalized by allowing to use any value as ideal value [@honel2022_qrs].
+
+
+For the thesis, I want to show a concrete example based on project management.
+For that, I will use some of the activities as were previously derived from an average manifestation of the Fire Drill using weighted mixtures [@honel2023_ecs].
+Over the (normalized) project time, we now have a probability distribution for each activity.
+There are six activities, three for source code and three for issue-tracking.
+We could say that the weighted mixtures represent a "process model" for the Fire Drill, from a quantitative perspective.
+However, I would not go this far at this point and call it a pattern, but rather a *typical accumulation*.
+It would perhaps become a reliable process model if we were to add many more observations of projects that were affected by the Fire Drill in some degree.
+
+
+## Loading the Weighted Mixtures
+
+Nevertheless, for the sake of demonstrating automatic calibration, we will take the weighted mixtures and use an approximation of these and call it a process model here.
+Figure \ref{fig:smooth-mixtures} shows the weighted mixture for each activity, as well as a simplified/smoothed version.
+We will pick one or two of these activities for demonstrating automatic calibration.
+
+```{r}
+# Let's load the weighted mixtures:
+weighted_mixtures <- readRDS("../data/weighted_mixtures.rds")
+```
+
+```{r}
+rejection_sampling <- function(x_data, y_data, xlim = c(0, 1), num_x = 1e3) {
+	tempf <- stats::approxfun(x = x_data, y = y_data, yleft = 0, yright = 0)#, rule = 2)
+	use_x <- seq(from = xlim[1], to = xlim[2], length.out = num_x)
+	use_y <- stats::runif(n = length(use_x), min = 0, max = max(y_data))
+	use_x[use_y <= tempf(use_x)]
+}
+
+
+gaussian_kde_pdf <- function(data) {
+	# Closed-form Gaussian KDE PDF:
+	use_bw <- bw.SJ(x = data)
+	kde_pdf <- Vectorize(function(x, h = use_bw) {
+		1 / (length(data) * h) * sum(dnorm((x - data) / h))
+	})
+	
+	# Cut the PDF so its integral [0,1] = 1
+	the_int <- cubature::cubintegrate(f = kde_pdf, lower = 0, upper = 1, maxEval = 1e4)$integral
+	return(function(x) {
+		kde_pdf(x) / the_int
+	})
+}
+
+
+make_smooth_dens <- function(org_densf, domain = c(0, 1), npoints = 15, span = 0.3) {
+	use_x <- seq(from = domain[1], to = domain[2], length.out = npoints)
+	y <- org_densf(use_x)
+	temp <- stats::loess.smooth(x = use_x, y = y, span = span, family = "g", evaluation = 1e3)
+	
+	# Rejection-sampling from this curve:
+	rej_samples <- rejection_sampling(
+		x_data = ((temp$x - min(temp$x)) / (max(temp$x) - min(temp$x))), y_data = temp$y)
+	
+	gaussian_kde_pdf(rej_samples)
+}
+```
+
+```{r smooth-mixtures, echo=FALSE, warning=FALSE, fig.width=7, fig.height=5, fig.cap="Weighted mixtures for all source code and issue-tracking activities."}
+par(mfrow = c(3,3), oma = rep(0,4), mar = c(2,2,2,1))
+
+use_x <- seq(from = 0, to = 1, length.out = 1e3)
+for (idx in 1:length(names(weighted_mixtures))) {
+	act <- names(weighted_mixtures)[idx]
+	wm <- weighted_mixtures[[act]]
+	tempf <- make_smooth_dens(org_densf = wm, span = .25)
+	y_max <- max(c(wm(use_x), tempf(use_x)))
+	
+	curve2(func = wm, from = 0, to = 1, ylim = c(0, y_max), main = act, xlab = "")
+	grid()
+	curve2(func = tempf, from = 0, to = 1, col = "red", add = TRUE)
+	if (idx == 2) {
+		legend(x = 0, y = y_max, legend = c("Original", "Smoothed"), lty = 1, lwd = 2, col = c("black", "red"), bg = "white")
+	}
+}
+```
+
+
+## Prepare for Scoring
+
+I think we should select the smoothed density for $\mathsf{REQ}$ from Figure \ref{fig:smooth-mixtures} as it makes for a good example.
+Automatic calibration requires a (representative) sample of the space of all possible outcomes.
+The larger the sample, the more accurate the scores will be.
+So, what we require here, is a set of $\mathsf{REQ}$ activities **as they might occur in real-life**.
+This is the point where one would either gather all observed instances or try to simulate them.
+We will do the latter.
+As we have no expectation as to how this activity might unfold in a random project, we will just generate random continuous probability distributions.
+
+
+The next step is then to select and compute features.
+The features should quantify the difference between the process model and any simulated process.
+For simplicity, we will compute the **area**, **correlation**, and **symmetric Jensen--Shannon divergence** between process and -model, and we will do so on a few selected segments.
+This will allow us then later to inspect individual scores for previously unseen processes.
+Let's say we simulate ten thousand processes, then we will get a data frame with ten thousand rows and some columns (metric per $n$th-segment $1\ldots n$).
+
+
+The second requirement for automatic calibration is an **ideal value** that allows us to transform any feature $F_i$ into a distance $D_i$.
+We will do this using the absolute value function.
+For an ideal value $d_i$, we obtain $D_i=\abs{\left(F_i-d_i\right)}$.
+This distribution (and esp. its (C)CDF) is then used to transform and (non-)linearly scale a feature to become a score.
+Since our features are distances (from the ideal), the scores based thereon will have the meaning *larger is better*.
+The *utopian* ideal value is for a *correlation* is $\bm{1}$, and for the area between it is $\bm{0}$.
+For the Jensen--Shannon divergence, it is $\bm{\infty}$, since we transform its values using the negative logarithm.
+However, for practical reasons, we will use the largest value observed during automatic calibration, as it is unlikely to observe a smaller value in practice, given that we drew many samples.
+
+
+## Calibration
+
+Now for the actual calibration.
+Let's generate a few thousand random processes and compute their segment-wise correlation with the smoothed $\mathsf{CP}$ activity.
+
+First, we'll define some helper functions.
+
+```{r}
+get_smoothed_curve <- function(seed, npoints = 15, span = 0.35) {
+	if (is.na(seed)) {
+		stop("A seed is required.")
+	}
+	set.seed(seed = seed)
+	
+	x <- sort(c(0, 1, runif(n = npoints - 2)))
+	y <- runif(n = length(x), min = 0, max = 1)
+	temp <- loess.smooth(x = x, y = y, span = span, family = "g", evaluation = 1000)
+	
+	# Rejection-sampling from this curve:
+	rej_samples <- rejection_sampling(
+		x_data = ((temp$x - min(temp$x)) / (max(temp$x) - min(temp$x))), y_data = temp$y)
+	
+	gaussian_kde_pdf(rej_samples)
+}
+
+
+jsd_segment <- function(p, q, ext = c(0, 0.1), xtol = 1e-20) {
+	cubature::cubintegrate(f = function(x) {
+		p_ <- p(x)
+		q_ <- q(x)
+		m_ <- .5 * (p_ + q_)
+		tryCatch({
+			if (abs(p_) < xtol || abs(q_) < xtol || abs(m_) < xtol) 0 else .5 * p_ * log(p_ / m_) + .5 * q_ * log(q_ / m_)
+		}, warning = function(w) {
+			stop(paste0(p(x), " ; ", q(x), " ; ", m_))
+		})
+	}, lower = ext[1], upper = ext[2], maxEval = 1e3)$integral
+}
+```
+
+
+
+```{r}
+use_activity <- "REQ"
+pm <- make_smooth_dens(org_densf = weighted_mixtures[[use_activity]]) # Process Model
+
+seg_starts <- c(.1, .4, .7)
+seg_len <- 0.2
+
+ac_features <- NULL
+
+for (use_feature in c("area", "corr", "jsd")) {
+	ac_features <- rbind(ac_features, loadResultsOrCompute(file = paste0("../results/ac_features-", use_feature, ".rds"), computeExpr = {
+		doWithParallelCluster(expr = {
+			library(foreach)
+			foreach::foreach(seed = seq(from = 1337, length.out = 1e4), .combine = rbind, .inorder = FALSE) %dopar% {
+				proc = get_smoothed_curve(seed = seed, npoints = 14, span = 0.35)
+				
+				temp <- matrix(nrow = 1, data = sapply(X = 1:length(seg_starts), FUN = function(seg_idx) {
+					# the segment
+					a <- seg_starts[seg_idx]
+					b <- a + seg_len
+					use_x <- seq(from = a, to = b, length.out = 500)
+					
+					if (use_feature == "area") {
+						# Area between:
+						mean(abs(pm(use_x) - proc(use_x))) * (b - a)
+					} else if (use_feature == "corr") {
+						# Correlation:
+						temp <- suppressWarnings({
+							stats::cor(x = pm(use_x), y = proc(use_x))
+						})
+						if (is.na(temp)) 0 else temp
+					} else if (use_feature == "jsd") {
+						# JSD:
+						jsd_segment(p = pm, q = proc, ext = c(a, b))
+					}
+				}))
+				
+				cbind(data.frame(
+					seed = seed,
+					feat = use_feature,
+					seg_len = seg_len,
+					seg_starts = paste0(seg_starts, collapse = ","),
+					stringsAsFactors = FALSE
+				), `colnames<-`(x = temp, value = paste0("seg_", 1:length(seg_starts))))
+			}
+		})
+	}))
+}
+```
+
+
+In Figure \ref{fig:pdf-cdf-approx} we show the PDF and CDF as approximated using kernel density estimation with Gaussian kernels.
+The bandwidth used is "SJ" [@sj1991bandwidth].
+In that figure, the number of samples increases with each row, from $5$ to $10,000$.
+While for relatively few sample the PDF/CDF change more drastically, the differences between large and very large sample sizes increasingly vanish.
+
+
+```{r pdf-cdf-approx, fig.cap="PDF and CDF for the three features as they get approximated with increasing sample sizes using Gaussian KDE.", fig.width=14, fig.height=18, warning=FALSE, echo=FALSE}
+feat_seg <- c("area" = 3, "corr" = 1, "jsd" = 2)
+
+
+par(mfrow = c(8, 6), mar = c(4,4,2,1))
+set.seed(1)
+for (n in c(10, 15, 20, 30, 100, 400, 1000, 1e4)) {
+	for (f in names(feat_seg)) {
+		temp <- ac_features[ac_features$feat == f,][[paste0("seg_", feat_seg[f])]]
+		temp <- sample(x = temp, size = n, replace = FALSE)
+		if (f == "jsd") {
+			temp <- -log(temp)
+			f <- paste0("-log(", f, ")")
+		}
+		
+		use_bw <- bw.SJ(x = temp)
+		tempdens <- density(x = temp, bw = use_bw)
+		plot(tempdens, main = paste0(f, ", PDF"))
+		grid()
+		
+		temp_cdf <- Vectorize(function(x, h = use_bw) 1 - 1 / length(temp) * sum(pnorm((x - temp) / h)))
+		curve2(temp_cdf, min(tempdens$x), max(tempdens$x), main = paste0(f, ", CCDF"))
+		grid()
+	}
+}
+```
+
+### Summary
+
+Here, we will generate two figures.
+In the first one, we show the Automatic Calibration of the three metrics after a fixed number of epochs.
+In the second, we summarize Figure \ref{fig:pdf-cdf-approx} into a new figure to be used in the dissertation.
+
+
+```{r}
+# In this function, we create the AC plot after n observed processes.
+make_ac_plot <- function(n) {
+	curve2(func = pm, from = 0, to = 1, lwd = 2, col = "#FF4A36", main = paste0("Automatic Calibration after ", n, " epochs."), xlab = "Relative Project Time", ylab = "Relative Likelihood", ylim = c(.05, 2.15))
+	
+	polygon_colors <- RColorBrewer::brewer.pal(12, "Set3")[c(4,5,7)]
+	
+	for (idx in 1:n) {
+		rp <- get_smoothed_curve(seed = idx, npoints = 14, span = 0.35)
+		for (fidx in 1:length(feat_seg)) {
+			f <- names(feat_seg)[fidx]
+			a <- seg_starts[feat_seg[f]]
+			b <- a + seg_len
+			use_x <- c(seq(from = a, to = b, length.out = 25))
+			use_x <- c(use_x, rev(use_x))
+			
+			polygon(x = use_x, y = c(
+	      sapply(X = head(use_x, length(use_x) / 2), FUN = function(x) {
+	        max(pm(x), rp(x))
+	      }),
+	      sapply(X = tail(use_x, length(use_x) / 2), FUN = function(x) {
+	        min(pm(x), rp(x))
+	      })
+	    ), col = if (idx == n) polygon_colors[fidx] else "#eeeeeef8", density = if (idx == n) 30 else 100, angle = if (idx == n) 20 else 0)
+		}
+	}
+	
+	for (idx in 1:n) {
+		rp <- get_smoothed_curve(seed = idx, npoints = 14, span = 0.35)
+		curve2(func = rp, from = 0, to = 1, lwd = if (idx == n) 2 else 1.25, add = TRUE, col = if (idx == n) "#444444" else "#bbbbbb")
+	}
+  
+  # Let's always over-draw the original proc:
+  for (fidx in 1:length(feat_seg)) {
+  	f <- names(feat_seg)[fidx]
+		a <- seg_starts[feat_seg[f]]
+		b <- a + seg_len
+		abline(v = c(a, b), lty = 5, col = "#dddddd")
+  }
+  curve2(pm, 0, 1, lwd = 3, col = "#FF4A36", add = TRUE)
+  grid()
+}
+```
+
+
+In Figure \ref{fig:ac-procs} we show how the automatic calibration may look after some epochs.
+In each epoch, a random process is drawn and the deviations against the process model are computed.
+
+
+```{r ac-procs, fig.width=12, fig.height=7, fig.cap="The process of Automatic Calibration, where the process model \textsf{REQ} and deviations are calibrated using random processes."}
+make_ac_plot(50)
+```
+
+Let's also make the summary of Figure \ref{fig:pdf-cdf-approx}.
+We will group each deviation's PDF and CDF into one plot and then show three to four rows of plots after some $n$ random processes.
+The result is shown in Figure \ref{fig:pdf-cdf-approx-summary}.
+
+
+```{r pdf-cdf-approx-summary, echo=FALSE, fig.width=11, fig.height=7, fig.cap="Summary of the PDF and CDF for the three features for samples sizes of $n=\\{10,20,50,10^4\\}$."}
+set.seed(1)
+use_n <- c(10, 20, 50, 10000)
+par(mfrow = c(length(use_n),3), mar = c(1,3,2,3))
+xlims <- list(
+	area = c(-0.01, 0.25),
+	corr = c(-1.1, 1.1),
+	jsd = c(2.5, 10))
+
+
+for (nidx in 1:length(use_n)) {
+	n <- use_n[nidx]
+	for (fidx in 1:length(feat_seg)) {
+		f <- names(sort(feat_seg))[fidx]
+		use_xlim <- xlims[[f]]
+		temp <- ac_features[ac_features$feat == f,][[paste0("seg_", feat_seg[f])]]
+		temp <- sample(x = temp, size = n, replace = FALSE)
+		if (f == "jsd") {
+			temp <- -log(temp)
+			f <- paste0("-log(", f, ")")
+		}
+		
+		use_bw <- bw.SJ(x = temp)
+		tempdens <- density(x = temp, bw = use_bw)
+		
+		if (nidx == length(use_n)) {
+			par(mar = c(2,3,2,3))
+		}
+		
+		plot.new()
+		plot.window(xlim=use_xlim, ylim=range(tempdens$y))
+		lines(x = tempdens$x, y = tempdens$y, lwd = 1.75)
+		axis(1, col.axis="black")
+		axis(2, col.axis="black")
+		box()
+		
+		# CDF:
+		plot.window(xlim=use_xlim, ylim=c(0,1))
+		temp_kde_cdf <- Vectorize(function(x, h = tempdens$bw)  1 / length(temp) * sum(pnorm((x - temp) / h)))
+		lines(x = tempdens$x, y = temp_kde_cdf(tempdens$x), col="darkred", lwd = 2)
+		axis(4, col.axis="darkred")
+		
+		if (nidx == 1) {
+			title(f)
+		}
+		grid()
+		#mtext("1st y axis", side = 2, las=3, line=3)
+		#mtext("2nd y axis", side = 4, las=3, line=3, col="darkred")
+	}
+}
+```
+
+
+
+
+
+## Dataset Preparation
+
+We want to show the original dataset (using the raw features) and the same dataset, processed into scores using the CCDFs from the previous calibration.
+We show only a simplified dataset, in which we measure the correlation on the first segment ($[0.1,0.3]$), the symmetric Jensen--Shannon divergence on the second segment ($[0.4,0.6]$), and the area between the curves on the third segment ($[0.7, 0.9]$).
+Also, the dataset will only include the chosen activity, $\mathsf{REQ}$, and will be generated for all $15$ projects.
+
+
+We will import the issue-tracking project data and create proper densities first, before creating the dataset.
+
+```{r}
+pnames_it <- paste0("Project", 1:15)
+projects_it <- loadResultsOrCompute(file = "../data/projects_it.rds", computeExpr = {
+	projects_it <- list()
+	
+	set.seed(1)
+	for (pname in pnames_it) {
+		temp <- readxl::read_excel(path = "../data/FD_issue-based_detection.xlsx", sheet = pname)
+		use_y <- as.numeric(temp[[tolower(use_activity)]])
+		use_y[is.na(use_y)] <- 0
+		tempdens <- density(x = temp$`time%`, weights = use_y / sum(use_y), bw = "SJ", cut = TRUE)
+		rej_samples <- rejection_sampling(x_data = tempdens$x, y_data = tempdens$y, num_x = 1e5)
+		
+		templ <- list()
+		templ[[use_activity]] <- gaussian_kde_pdf(rej_samples)
+		projects_it[[pname]] <- templ
+	}
+	projects_it
+})
+```
+
+
+### Create the Dataset
+
+Now as for the actual dataset, we will compute the same metrics on the same segments as were used for the automatic calibration.
+Here, however, we compute these for every project's activity against the process model used in AC.
+
+```{r}
+use_feats <- c("area", "corr", "jsd")
+ac_dataset <- loadResultsOrCompute(file = "../data/ac_dataset.csv", computeExpr = {
+	ac_dataset <- data.frame(matrix(nrow = 0, ncol = 3))
+
+	for (pname in names(projects_it)) {
+		proc <- projects_it[[pname]]$REQ
+		tempm <- matrix(nrow = 1, ncol = 3)
+		
+		for (f_idx in 1:length(use_feats)) {
+			f <- use_feats[f_idx]
+			# the segment
+			seg_idx <- feat_seg[f]
+			a <- seg_starts[seg_idx]
+			b <- a + seg_len
+			use_x <- seq(from = a, to = b, length.out = 500)
+			
+			tempm[1, f_idx] <- if (f == "area") {
+				mean(abs(pm(use_x) - proc(use_x))) * (b - a)
+			} else if (f == "corr") {
+				temp <- suppressWarnings({
+					stats::cor(x = pm(use_x), y = proc(use_x))
+				})
+				if (is.na(temp)) 0 else temp
+			} else if (f == "jsd") {
+				jsd_segment(p = pm, q = proc, ext = c(a, b))
+			}
+		}
+		
+		ac_dataset <- rbind(ac_dataset, tempm)
+	}
+	`colnames<-`(x = ac_dataset, value = use_feats)
+})
+```
+
+
+Let's show the z-standardized data in Table \ref{tab:ac-dataset-zstd}.
+These are the raw features for each project, with mean equal to zero and unit-variance (z-standardized).
+It becomes apparent that we cannot comprehend this data at all, but it is often fed into regression models in exactly this shape.
+
+
+```{r echo=FALSE}
+temp <- as.data.frame(scale(ac_dataset))
+rownames(temp) <- pnames_it
+
+if (interactive()) {
+  temp
+} else {
+  knitr::kable(
+    x = temp,
+    booktabs = TRUE,
+    caption = paste0("Z-standardized data of three features for the activity ", use_activity, "."),
+    label = "ac-dataset-zstd"
+  )
+}
+```
+
+
+### Rank-transform
+
+We have previously carried out the automatic calibration and collected many observations for each feature in each of the defined segments.
+We are now ready to extract the CCDFs and transform the original dataset into a dataset of scores.
+Let's create the CCDFs using each feature's ideal value first.
+
+```{r}
+feat_ideal <- c("area" = 0, "corr" = 1, "jsd" = max(-log(ac_features[ac_features$feat == "jsd", paste0("seg_", feat_seg["jsd"])])))
+ac_ccdfs <- list()
+
+for (f in use_feats) {
+	ac_ccdfs[[f]] <- (function() {
+		temp <- ac_features[ac_features$feat == f,][[paste0("seg_", feat_seg[f])]]
+		if (f == "jsd") {
+			temp <- -log(temp)
+		}
+		# Transform using ideal value:
+		temp <- abs(temp - feat_ideal[f])
+		use_bw <- bw.SJ(x = temp)
+		Vectorize(function(x, h = use_bw) 1 - (1 / length(temp) * sum(pnorm((x - temp) / h))))
+	})()
+}
+```
+
+
+```{r ccdfs, echo=FALSE, fig.width=12, fig.height=4, fig.cap="CCDFs for the three features as calibrated by the automatic calibration."}
+par(mfrow = c(1,3))
+
+for (f in use_feats) {
+	x_max <- nloptr::nloptr(
+    x0 = mean(1e-3),
+    opts = list(
+      maxeval = 2e2,
+      algorithm = "NLOPT_GN_DIRECT_L_RAND"),
+    eval_f = function(x) (ac_ccdfs[[f]](x) - 1e-3)^2,
+    lb = 0,
+    ub = 10
+  )$solution
+	
+	curve2(func = ac_ccdfs[[f]], from = 0, to = x_max, lw = 1.25, main = paste0("CCDF of ", if (f != "jsd") f else paste0("-log(", f, ")")))
+	grid()
+	curve2(func = ac_ccdfs[[f]], from = 0, to = x_max, lw = 1.25, add = TRUE)
+}
+```
+
+
+Figure \ref{fig:ccdfs} shows the CCDFs associated with each feature.
+They are used to transform the dataset into scores, where a higher score indicates a lower distance to the ideal value.
+This is shown in Table \ref{tab:ac-dataset-scores}.
+This table allows us now for each project and each metric, to assess how good it matches the process model in the metric's segment.
+
+
+```{r}
+ac_dataset_scores <- `rownames<-`(x = data.frame(
+	area = ac_ccdfs$area(abs(feat_ideal["area"] - ac_dataset$area)),
+	corr = ac_ccdfs$corr(abs(feat_ideal["corr"] - ac_dataset$corr)),
+	jsd = ac_ccdfs$jsd(abs(feat_ideal["jsd"] - -log(ac_dataset$jsd)))), value = pnames_it)
+```
+
+```{r echo=FALSE}
+if (interactive()) {
+  ac_dataset_scores
+} else {
+  knitr::kable(
+    x = ac_dataset_scores,
+    booktabs = TRUE,
+    caption = "The previous dataset where all features have been transformed to scores.",
+    label = "ac-dataset-scores"
+  )
+}
+```
+
+
+## Regression Tests and Rank-transforms
+
+Let's test whether a simple linear model works better with the original data or with scores.
+My hypothesis is that it will work better (that means, lower average validation error) with scores.
+We will test this using Leave-one-out Cross-validation [@lachenbruch1968Loocv].
+
+First, we have to load the ground truth.
+
+```{r}
+ground_truth_all <- rbind(
+  read.csv(file = "../data/ground-truth.csv", sep = ";"),
+  read.csv(file = "../data/ground-truth_2nd-batch.csv", sep = ";"))
+```
+
+
+
+### LOOCV Using the Ordinary Dataset
+
+Here we train a model using the original dataset.
+We will pre-process the raw features simply by standardizing them.
+Table \ref{tab:varimp-averaged} shows the averaged variable importance.
+
+```{r}
+predicted <- c()
+dataset <- cbind(ac_dataset, data.frame(gt = ground_truth_all$consensus / 10))
+var_imp <- NULL
+
+for (pId in 1:15) {
+	train <- dataset[setdiff(1:15, pId),] # LOO dataset
+	valid <- dataset[pId,]
+	
+	pre_proc <- caret::preProcess(train[, "gt" != colnames(train)], method = c("center", "scale"))
+	train <- predict(pre_proc, train)
+	valid <- predict(pre_proc, valid)
+	
+	model <- lm(formula = gt~., data = train)
+	#model <- randomForest::randomForest(gt~., train)
+	#model <- neuralnet::neuralnet(formula = gt~., data = train, hidden = c(2,2))
+	predicted <- c(predicted, predict(model, valid))
+	
+	temp <- caret::varImp(model) / sum(caret::varImp(model))
+	# We'll average the variable importance later
+	var_imp <- if (is.null(var_imp)) temp else var_imp + temp
+}
+
+print(model$coefficients)
+print(sqrt(mean((predicted - dataset$gt)^2)))
+var_imp <- var_imp / sum(var_imp)
+```
+
+```{r echo=FALSE}
+temp <- data.frame(var_imp)
+
+if (interactive()) {
+  temp
+} else {
+  knitr::kable(
+    x = temp,
+    booktabs = TRUE,
+    caption = "Averaged variable importance for the trained model.",
+    label = "varimp-averaged"
+  )
+}
+```
+
+
+### LOOCV Using the Scores Dataset
+
+Let's do the leave-one-out training for every project.
+Then, in Table \ref{tab:varimp-averaged-scores}, we show the variable importance of the trained model.
+
+```{r}
+predicted <- c()
+dataset <- cbind(ac_dataset_scores, data.frame(gt = ground_truth_all$consensus / 10))
+var_imp <- NULL
+
+for (pId in 1:15) {
+	train <- dataset[setdiff(1:15, pId),] # LOO dataset
+	valid <- dataset[pId,]
+	
+	# This has no effect on a linear model.
+	#pre_proc <- caret::preProcess(train[, "gt" != colnames(train)], method = c("center", "scale"))
+	#train <- predict(pre_proc, train)
+	#valid <- predict(pre_proc, valid)
+	
+	model <- lm(formula = gt~., data = train)
+	#model <- randomForest::randomForest(gt~., train)
+	#model <- neuralnet::neuralnet(formula = gt~., data = train, hidden = c(2,2))
+	predicted <- c(predicted, predict(model, valid))
+	
+	temp <- caret::varImp(model) / sum(caret::varImp(model))
+	# We'll average the variable importance later
+	var_imp <- if (is.null(var_imp)) temp else var_imp + temp
+}
+
+print(model$coefficients)
+print(sqrt(mean((predicted - dataset$gt)^2)))
+var_imp <- var_imp / sum(var_imp)
+```
+
+```{r echo=FALSE}
+temp <- data.frame(var_imp)
+
+if (interactive()) {
+  temp
+} else {
+  knitr::kable(
+    x = temp,
+    booktabs = TRUE,
+    caption = "Averaged variable importance for the model trained using scores instead of standardized features.",
+    label = "varimp-averaged-scores"
+  )
+}
+```
+
+
+
+### Rank-transforms
+
+Let's demonstrate raw features vs. z-standardized features vs. scores for one example.
+We will pick one project and learn the scaling on the others.
+Then, we'll train a predictive model and evaluate the result using scores and variable importance.
+
+```{r warning=FALSE}
+dataset <- cbind(ac_dataset, data.frame(gt = ground_truth_all$consensus / 10))
+use_pid <- 15 # 15, 7, 12
+train <- dataset[setdiff(1:15, use_pid),]
+valid <- dataset[use_pid,]
+
+set.seed(1)
+model <- randomForest::randomForest(gt~., train, importance=TRUE, localImp=TRUE, mtry=3)
+c(predict(model, valid), valid$gt)
+```
+
+And the importances are:
+
+```{r}
+tempdf <- as.data.frame(model$importance)
+(temp_imp <- `names<-`(x = abs(tempdf$`%IncMSE`) / sum(abs(tempdf$`%IncMSE`)), values = rownames(tempdf)))
+```
+
+```{r pm-vs-p, echo=FALSE, fig.width=10, fig.height=5, fig.cap="Correlation, Jensen--Shannon divergence, and area between for the process model (REQ) vs. a process."}
+plot.new()
+plot.window(xlim=c(0,1), ylim=c(0.2,1.8))
+axis(1)
+axis(2)
+mtext("Relative Project Time", side = 1, las=1, line=3)
+mtext("Relative Likelihood", side = 2, las=3, line=3)
+box()
+grid()
+
+tempf <- projects_it[[paste0("Project", use_pid)]]
+tempf_upper <- Vectorize(function(x) max(pm(x), tempf$REQ(x)))
+tempf_lower <- Vectorize(function(x) min(pm(x), tempf$REQ(x)))
+
+use_cols <- RColorBrewer::brewer.pal(12, "Set3")[c(4,5,7)]
+
+for (f in names(feat_seg)) {
+	a <- seg_starts[feat_seg[f]]
+	b <- a + seg_len
+	use_x <- seq(from = a, to = b, length.out = 20)
+	use_y <- c(tempf_upper(use_x), tempf_lower(rev(use_x)))
+	use_x <- c(use_x, rev(use_x))
+	rect(xleft = a, ytop = 2, xright = b, ybottom = 0, col = "#00000003")
+	polygon(x = use_x, y = use_y, density = 30, angle = 20, col = use_cols[feat_seg[f]])
+}
+
+curve2(func = pm, 0, 1, col = "red", lwd = 1.9, add = TRUE)
+curve2(func = projects_it[[paste0("Project", use_pid)]]$REQ, 0, 1, lwd = 1.5, add = TRUE)
+abline(v = c(.1,.3,.4,.6,.7,.9), lty = 5, col = "#dddddd")
+
+
+legend(x = 0.55, y = 1.8, legend = c("Correlation", "Jensen--Shannon Divergence", "Area between", "PM"),
+			 angle = c(rep(20, 3), 0), density = c(rep(30, 3), 0), lty = c(rep(NA, 3), 1), lwd = c(rep(NA, 3), 2), border = c(rep("#000000", 3), NA), fill = c(use_cols[1:3], NA), bg = "white", x.intersp = c(1,1,1,1), col = c(rep(NA, 3), "red"))
+```
+
+Figure \ref{fig:pm-vs-p} shows an example of measuring the deviation between a process model and a process.
+Table \ref{tab:ac-std-vs-scores} then shows the original feature's data, the scaled data, and the scores for this example.
+
+```{r echo=FALSE}
+train_scaler <- attributes(scale(x = train[, 1:3]))
+
+temp <- `rownames<-`(x = rbind(
+	valid[, 1:3],
+	`colnames<-`(x = matrix(as.numeric(valid[1, 1:3] - train_scaler$`scaled:center`), nrow = 1) / matrix(train_scaler$`scaled:scale`, nrow = 1), value = names(valid[, 1:3])),
+	ac_dataset_scores[use_pid,]
+), value = c("Raw Feature", "Z-scaled", "As Score"))
+
+
+if (interactive()) {
+  temp
+} else {
+  knitr::kable(
+    x = temp,
+    booktabs = TRUE,
+    caption = "Raw features, Z-standardized features, and Scores for the same deviations.",
+    label = "ac-std-vs-scores"
+  )
+}
+```
+
+
+```{r}
+# We get the "mean" score using the sum, because the weights already sum to 1!
+sum(`names<-`(x = as.numeric(temp_imp * ac_dataset_scores[use_pid,]), value = colnames(ac_dataset_scores)))
+```
+
+```{r}
+# These are the weighted scores:
+`names<-`(x = as.numeric(temp_imp * ac_dataset_scores[use_pid,]), value = colnames(ac_dataset_scores))
+```
+
+
+
+
+\clearpage
 
 # References {-}
 
