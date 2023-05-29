@@ -20,8 +20,12 @@ header-includes:
 - \usepackage{xurl}
 - \usepackage[nottoc]{tocbibind}
 - \usepackage{subfig}
-
 output:
+  md_document:
+    toc: yes
+    toc_depth: 6
+    df_print: kable
+    variant: gfm
   bookdown::pdf_document2:
     fig_caption: yes
     number_sections: yes
@@ -31,11 +35,6 @@ output:
     keep_tex: yes
     latex_engine: pdflatex
     citation_package: biblatex
-  md_document:
-    toc: yes
-    toc_depth: 6
-    df_print: kable
-    variant: gfm
   html_document:
     number_sections: yes
     toc: yes
@@ -45,7 +44,6 @@ output:
   word_document:
     toc: yes
     toc_depth: 6
-
 #abstract: "\\noindent Here goes the abstract."
 ---
 
@@ -59,10 +57,6 @@ output:
 \listoffigures
 \listoftables
 
-```{r echo=FALSE}
-# Set this to false to show R code
-#PAPER_MODE <- FALSE
-```
 
 
 ```{r setup, include=FALSE}
@@ -82,16 +76,15 @@ Sys.setenv(LC_NUMERIC = en_US.UTF8)
 Sys.setenv(LC_TIME = en_US.UTF8)
 ```
 
-```{r echo=FALSE}
+```{r echo=FALSE, warning=FALSE, message=FALSE}
 source(file = "./helpers.R")
+library(dplyr)
 ```
 
-```{r echo=FALSE, eval=FALSE}
+```{r echo=FALSE, eval=interactive()}
 library(extrafont)
 font_import()
 loadfonts()
-
-library(dplyr)
 ```
 
 ```{r echo=FALSE}
@@ -227,7 +220,7 @@ makefig <- function(paper = FALSE) {
 eval(makefig(TRUE))
 ```
 
-```{r echo=FALSE, eval=FALSE, fig.width=8, fig.height=5}
+```{r echo=FALSE, eval=interactive()}
 saveTikzExpr(makefig(paper = TRUE), "rr_3sigma-robust", height = 3.3, width = 1.15 * FIG_WIDTH)
 ```
 
@@ -552,7 +545,7 @@ paper <- FALSE
 eval(make_ac_plot())
 ```
 
-```{r}
+```{r echo=FALSE, eval=interactive()}
 n <- 10
 paper <- TRUE
 saveTikzExpr(expr = make_ac_plot(), name = "ac-proc", height = 3.2, width = 1.15 * FIG_WIDTH)
@@ -631,7 +624,7 @@ make_pdf_cdf_summary <- function() {
 eval(make_pdf_cdf_summary())
 ```
 
-```{r}
+```{r echo=FALSE, eval=interactive()}
 saveTikzExpr(expr = make_pdf_cdf_summary(), name = "ac-approx", width = 1.15 * FIG_WIDTH, height = 4.5)
 ```
 
@@ -994,7 +987,7 @@ make_ps_vs_p <- function() {
 eval(make_ps_vs_p())
 ```
 
-```{r echo=FALSE, eval=FALSE}
+```{r echo=FALSE, eval=interactive()}
 saveTikzExpr(expr = make_ps_vs_p(), name = "ac-raw-vs-scores", width = 1.15 * FIG_WIDTH, height = 3.2)
 ```
 

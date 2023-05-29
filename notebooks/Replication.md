@@ -1,22 +1,6 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 - [Preface](#preface)
-- [Source code density Expectation and Standard
-  deviation](#source-code-density-expectation-and-standard-deviation)
+- [Source code density Expectation and Standard deviation](#source-code-density-expectation-and-standard-deviation)
+- [Effective Training on Scarce Data](#effective-training-on-scarce-data)
 - [Automatic Calibration](#automatic-calibration)
   - [Loading the Weighted Mixtures](#loading-the-weighted-mixtures)
   - [Prepare for Scoring](#prepare-for-scoring)
@@ -25,10 +9,8 @@
   - [Dataset Preparation](#dataset-preparation)
     - [Create the Dataset](#create-the-dataset)
     - [Rank-transform](#rank-transform)
-  - [Regression Tests and
-    Rank-transforms](#regression-tests-and-rank-transforms)
-    - [LOOCV Using the Ordinary
-      Dataset](#loocv-using-the-ordinary-dataset)
+  - [Regression Tests and Rank-transforms](#regression-tests-and-rank-transforms)
+    - [LOOCV Using the Ordinary Dataset](#loocv-using-the-ordinary-dataset)
     - [LOOCV Using the Scores Dataset](#loocv-using-the-scores-dataset)
     - [Rank-transforms](#rank-transforms)
 - [References](#references)
@@ -74,6 +56,19 @@ for (pname in names(projects_sc)) {
 
     ##            mean mean (integral)              sd 
     ##       0.7991963       0.7991868       0.1897813
+
+# Effective Training on Scarce Data
+
+<figure>
+<img src="Replication_files/figure-gfm/nnet-rmse-cis-1.png"
+alt="Continuous confidence of the neural network predictor, with regard to number of training instances. Shown are the values according to the 68-95-99.7%-rule (assuming a normal distribution for every generalization error). The mean RMSE was determined using 50 models’ predictions on validation data. The three color gradients correspond to the three sigmas." />
+<figcaption aria-hidden="true">Continuous confidence of the neural
+network predictor, with regard to number of training instances. Shown
+are the values according to the 68-95-99.7%-rule (assuming a normal
+distribution for every generalization error). The mean RMSE was
+determined using 50 models’ predictions on validation data. The three
+color gradients correspond to the three sigmas.</figcaption>
+</figure>
 
 # Automatic Calibration
 
@@ -309,49 +304,75 @@ in the dissertation.
 
 ``` r
 # In this function, we create the AC plot after n observed processes.
-make_ac_plot <- function(n) {
-  curve2(func = pm, from = 0, to = 1, lwd = 2, col = "#FF4A36", main = paste0("Automatic Calibration after ",
-    n, " epochs."), xlab = "Relative Project Time", ylab = "Relative Likelihood",
-    ylim = c(0.05, 2.15))
+make_ac_plot <- function() {
+  rlang::expr({
+    cex <- if (paper)
+      0.9 else 1
+    mline <- if (paper)
+      2 else 3
+    lline <- if (paper)
+      2 else 2.75
 
-  polygon_colors <- RColorBrewer::brewer.pal(12, "Set3")[c(4, 5, 7)]
+    if (paper) {
+      # 5.1 4.1 4.1 2.1
+      par(mar = c(4.1, 3.6, 2.1, 1.1))
+    }
 
-  for (idx in 1:n) {
-    rp <- get_smoothed_curve(seed = idx, npoints = 14, span = 0.35)
+    use_ylim <- 2.8
+
+    curve2(func = pm, from = 0, to = 1, lwd = 2, col = "#FF4A36", main = paste0("Automatic Calibration after ",
+      n, " epochs."), xlab = "", ylab = "", xaxt = "n", yaxt = "n", ylim = c(0.05,
+      use_ylim), cex.main = cex, cex.lab = cex, cex.axis = cex)
+
+    mtext(text = "Relative Project Time", side = 1, line = mline, cex = cex)
+    mtext(text = "Relative Likelihood", side = 2, line = mline, cex = cex)
+    axis(1, at = seq(0, 1, by = 0.1), cex.axis = cex)
+    axis(2, at = seq(0, use_ylim, by = 0.2), cex.axis = cex)
+
+    polygon_colors <- RColorBrewer::brewer.pal(12, "Set3")[c(4, 5, 7)]
+
+    for (idx in 1:n) {
+      rp <- get_smoothed_curve(seed = idx, npoints = 14, span = 0.35)
+      for (fidx in 1:length(feat_seg)) {
+        f <- names(feat_seg)[fidx]
+        a <- seg_starts[feat_seg[f]]
+        b <- a + seg_len
+        use_x <- c(seq(from = a, to = b, length.out = 25))
+        use_x <- c(use_x, rev(use_x))
+
+        polygon(x = use_x, y = c(sapply(X = head(use_x, length(use_x)/2),
+          FUN = function(x) {
+          max(pm(x), rp(x))
+          }), sapply(X = tail(use_x, length(use_x)/2), FUN = function(x) {
+          min(pm(x), rp(x))
+        })), col = if (idx == n)
+          polygon_colors[fidx] else "#eeeeeef8", density = if (idx == n)
+          30 else 100, angle = if (idx == n)
+          20 else 0)
+      }
+    }
+
+    for (idx in 1:n) {
+      rp <- get_smoothed_curve(seed = idx, npoints = 14, span = 0.35)
+      curve2(func = rp, from = 0, to = 1, lwd = if (idx == n)
+        2 else 1.25, add = TRUE, col = if (idx == n)
+        "#444444" else "#bbbbbb")
+    }
+
+    # Let's always over-draw the original proc:
     for (fidx in 1:length(feat_seg)) {
       f <- names(feat_seg)[fidx]
       a <- seg_starts[feat_seg[f]]
       b <- a + seg_len
-      use_x <- c(seq(from = a, to = b, length.out = 25))
-      use_x <- c(use_x, rev(use_x))
-
-      polygon(x = use_x, y = c(sapply(X = head(use_x, length(use_x)/2), FUN = function(x) {
-        max(pm(x), rp(x))
-      }), sapply(X = tail(use_x, length(use_x)/2), FUN = function(x) {
-        min(pm(x), rp(x))
-      })), col = if (idx == n)
-        polygon_colors[fidx] else "#eeeeeef8", density = if (idx == n)
-        30 else 100, angle = if (idx == n)
-        20 else 0)
+      abline(v = c(a, b), lty = 5, col = "#dddddd")
     }
-  }
+    curve2(pm, 0, 1, lwd = 3, col = "#FF4A36", add = TRUE)
+    grid()
 
-  for (idx in 1:n) {
-    rp <- get_smoothed_curve(seed = idx, npoints = 14, span = 0.35)
-    curve2(func = rp, from = 0, to = 1, lwd = if (idx == n)
-      2 else 1.25, add = TRUE, col = if (idx == n)
-      "#444444" else "#bbbbbb")
-  }
-
-  # Let's always over-draw the original proc:
-  for (fidx in 1:length(feat_seg)) {
-    f <- names(feat_seg)[fidx]
-    a <- seg_starts[feat_seg[f]]
-    b <- a + seg_len
-    abline(v = c(a, b), lty = 5, col = "#dddddd")
-  }
-  curve2(pm, 0, 1, lwd = 3, col = "#FF4A36", add = TRUE)
-  grid()
+    legend(x = 0.44, y = use_ylim - 0.025, legend = c("Process Model", "Process",
+      "Simulated Processes"), bg = "white", cex = cex, col = c("red", "#444444",
+      "#bbbbbb"), lwd = c(2, 2, 1.25), lty = 1)
+  })
 }
 ```
 
@@ -360,7 +381,9 @@ epochs. In each epoch, a random process is drawn and the deviations
 against the process model are computed.
 
 ``` r
-make_ac_plot(50)
+n <- 2
+paper <- FALSE
+eval(make_ac_plot())
 ```
 
 <figure>
