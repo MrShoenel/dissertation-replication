@@ -86,6 +86,25 @@ Sys.setenv(LC_TIME = en_US.UTF8)
 source(file = "./helpers.R")
 ```
 
+```{r echo=FALSE, eval=FALSE}
+library(extrafont)
+font_import()
+loadfonts()
+
+library(dplyr)
+```
+
+```{r echo=FALSE}
+FIG_WIDTH <- round(4.52844, 4)
+
+saveTikzExpr <- function(expr, name, width = FIG_WIDTH, height = 3.2) {
+  tikzDevice::tikz(file = paste0("../figures/", name, ".tex"), width = width, height = height, verbose = FALSE, )
+  eval(expr)
+  dev.off()
+}
+```
+
+
 
 # Preface {-}
 
@@ -123,6 +142,94 @@ for (pname in names(projects_sc)) {
 
 
 
+# Effective Training on Scarce Data
+
+
+```{r echo=FALSE}
+res_grid_np_divergence <- readRDS(file = "../results/rob-reg-np_res-grid.rds")
+
+temp <- res_grid_np_divergence # res_grid_np_both
+temp <- temp[temp$model == "nnet" & !temp$do_pca & temp$dataset == "dataset_np_sc_oversampled",]# & temp$num_train <= 20,]
+temp <- temp[stats::complete.cases(temp[, colnames(temp)[colnames(temp) != "num_comps"]]),]
+
+tempf <- function(num_train, rmse) {
+  num_train <- round(num_train)
+  vals <- temp[temp$num_train == num_train,]$rmse_valid
+  mean_ <- mean(vals)
+  sd_ <- sd(vals)
+  temp <- 200 * abs(.5 - pnorm(q = rmse, mean = mean_, sd = sd_))
+  return(temp)
+  #if (temp < 99.9) temp else NA_real_
+}
+
+tempgrid <- outer(X = seq(min(temp$num_train), max(temp$num_train), by = 1), Y = seq(0, 3, length.out = 100), FUN = Vectorize(tempf))
+```
+
+
+```{r nnet-rmse-cis, echo=FALSE, fig.width=8, fig.height=5, fig.cap="Continuous confidence of the neural network predictor, with regard to number of training instances. Shown are the values according to the 68-95-99.7\\%-rule (assuming a normal distribution for every generalization error). The mean RMSE was determined using 50 models' predictions on validation data. The three color gradients correspond to the three sigmas."}
+makefig <- function(paper = FALSE) {
+  rlang::expr({
+    paper <- !!paper
+    cex <- if (paper) .9 else 1
+    mline <- if (paper) 2 else 3
+    lline <- if (paper) 2 else 2.75
+    
+    if (paper) {
+      # 5.1 4.1 4.1 2.1
+      par(mar = c(4.1, 3.6, 2.1, 1.1))
+    }
+    
+    fields::image.plot(list(
+      x = seq(min(temp$num_train), max(temp$num_train), by = 1), y = seq(0, 3, length.out = 100), z = tempgrid),
+      col = c(
+        colorRampPalette(colors = c("#006979FF", "#E0EFF3FF"))(70)[2:68],
+        colorRampPalette(colors = c("#0C46A0FF", "#E3F2FDFF"))(29)[2:28],
+        colorRampPalette(colors = c("#311A92FF", "#ECE6F6FF"))(10)[c(4,6,8,10)],
+        "white"),
+      legend.shrink = .75, legend.lab = "Confidence", legend.line = lline, legend.cex = cex,
+      xlab = "", ylab = "",
+      xaxt = "n", yaxt = "n",
+      cex.main = cex, cex.lab = cex, cex.axis = cex,
+      main = paste0("Confidence intervals according to the ", if (paper) "$68$--$95$--$99.7$" else "68-95-99.7", if (paper) "\\", "%-rule."))
+    mtext(text = "Number of training instances", side = 1, line = mline, cex = cex)
+    mtext(text = "RMSE (validation data)", side = 2, line = mline, cex = cex)
+    axis(1, at = seq(0, 100, by = 5), cex.axis = cex)
+    axis(2, at = seq(0, 3, by = .25), cex.axis = cex)
+    
+    lines(col = "#FD4103", lwd = 2, x = min(temp$num_train):max(temp$num_train), y =
+          (temp %>% group_by(num_train) %>% summarize(Mean = mean(rmse_valid), .groups = "drop"))$Mean)
+    
+    
+    tempf <- function(num_train, sigma = 1, sub = FALSE) {
+      num_train <- round(num_train)
+      vals <- temp[temp$num_train == num_train,]$rmse_valid
+      mean_ <- mean(vals)
+      sd_ <- sd(vals)
+      mean_ + (if (sub) -1 else 1) * sigma * sd_
+    }
+    
+    use_x <- seq(from = 0, to = 55, length.out = 5e2)
+    lines(x = use_x, y = Vectorize(function(num_train) tempf(num_train = num_train, sigma = 1))(use_x), lwd = 2, col = "#000000", lty = 1)
+    lines(x = use_x, y = Vectorize(function(num_train) tempf(num_train = num_train, sigma = 2))(use_x), lwd = 2, col = "#333333", lty = 2)
+    lines(x = use_x, y = Vectorize(function(num_train) tempf(num_train = num_train, sigma = 3))(use_x), lwd = 2, col = "#666666", lty = 4)
+    lines(x = use_x, y = Vectorize(function(num_train) tempf(num_train = num_train, sigma = 1, sub = TRUE))(use_x), lwd = 2, col = "#000000", lty = 1)
+    lines(x = use_x, y = Vectorize(function(num_train) tempf(num_train = num_train, sigma = 2, sub = TRUE))(use_x), lwd = 2, col = "#333333", lty = 2)
+    lines(x = use_x, y = Vectorize(function(num_train) tempf(num_train = num_train, sigma = 3, sub = TRUE))(use_x), lwd = 2, col = "#666666", lty = 4)
+    
+    abline(v = seq(0, 55, by = 5), h = seq(0, 3, by = .5), lty = 3, lwd = .5, col = "#666666")
+    use_leq <- function(n) {
+      if (paper) paste0("$\\leq\\!", n, "$") else paste0("<= ", n)
+    }
+    legend(x = 24, y = 2.9, legend = c("Mean RMSE (validation)", paste0(use_leq(1), " standard deviation"), paste0(use_leq(2), " std. devs."), paste0(use_leq(3), " std. devs.")), col = c("#FD4103", "#000000", "#333333", "#666666"), lwd = 2, lty = c(1, 1, 2, 4), bg = "white", cex = cex)
+  })
+}
+
+eval(makefig(TRUE))
+```
+
+```{r echo=FALSE, eval=FALSE, fig.width=8, fig.height=5}
+saveTikzExpr(makefig(paper = TRUE), "rr_3sigma-robust", height = 3.3, width = 1.15 * FIG_WIDTH)
+```
 
 # Automatic Calibration
 
@@ -371,45 +478,66 @@ In the second, we summarize Figure \ref{fig:pdf-cdf-approx} into a new figure to
 
 ```{r}
 # In this function, we create the AC plot after n observed processes.
-make_ac_plot <- function(n) {
-	curve2(func = pm, from = 0, to = 1, lwd = 2, col = "#FF4A36", main = paste0("Automatic Calibration after ", n, " epochs."), xlab = "Relative Project Time", ylab = "Relative Likelihood", ylim = c(.05, 2.15))
-	
-	polygon_colors <- RColorBrewer::brewer.pal(12, "Set3")[c(4,5,7)]
-	
-	for (idx in 1:n) {
-		rp <- get_smoothed_curve(seed = idx, npoints = 14, span = 0.35)
-		for (fidx in 1:length(feat_seg)) {
-			f <- names(feat_seg)[fidx]
+make_ac_plot <- function() {
+	rlang::expr({
+		cex <- if (paper) .9 else 1
+		mline <- if (paper) 2 else 3
+		lline <- if (paper) 2 else 2.75
+		
+		if (paper) {
+		  # 5.1 4.1 4.1 2.1
+		  par(mar = c(4.1, 3.6, 2.1, 1.1))
+		}
+		
+		use_ylim <- 2.8
+		
+		curve2(func = pm, from = 0, to = 1, lwd = 2, col = "#FF4A36", main = paste0("Automatic Calibration after ", n, " epochs."), xlab = "", ylab = "", xaxt = "n", yaxt = "n", ylim = c(.05, use_ylim), cex.main = cex, cex.lab = cex, cex.axis = cex)
+		
+		mtext(text = "Relative Project Time", side = 1, line = mline, cex = cex)
+	  mtext(text = "Relative Likelihood", side = 2, line = mline, cex = cex)
+	  axis(1, at = seq(0, 1, by = .1), cex.axis = cex)
+	  axis(2, at = seq(0, use_ylim, by = .2), cex.axis = cex)
+		
+		
+		polygon_colors <- RColorBrewer::brewer.pal(12, "Set3")[c(4,5,7)]
+		
+		for (idx in 1:n) {
+			rp <- get_smoothed_curve(seed = idx, npoints = 14, span = 0.35)
+			for (fidx in 1:length(feat_seg)) {
+				f <- names(feat_seg)[fidx]
+				a <- seg_starts[feat_seg[f]]
+				b <- a + seg_len
+				use_x <- c(seq(from = a, to = b, length.out = 25))
+				use_x <- c(use_x, rev(use_x))
+				
+				polygon(x = use_x, y = c(
+		      sapply(X = head(use_x, length(use_x) / 2), FUN = function(x) {
+		        max(pm(x), rp(x))
+		      }),
+		      sapply(X = tail(use_x, length(use_x) / 2), FUN = function(x) {
+		        min(pm(x), rp(x))
+		      })
+		    ), col = if (idx == n) polygon_colors[fidx] else "#eeeeeef8", density = if (idx == n) 30 else 100, angle = if (idx == n) 20 else 0)
+			}
+		}
+		
+		for (idx in 1:n) {
+			rp <- get_smoothed_curve(seed = idx, npoints = 14, span = 0.35)
+			curve2(func = rp, from = 0, to = 1, lwd = if (idx == n) 2 else 1.25, add = TRUE, col = if (idx == n) "#444444" else "#bbbbbb")
+		}
+	  
+	  # Let's always over-draw the original proc:
+	  for (fidx in 1:length(feat_seg)) {
+	  	f <- names(feat_seg)[fidx]
 			a <- seg_starts[feat_seg[f]]
 			b <- a + seg_len
-			use_x <- c(seq(from = a, to = b, length.out = 25))
-			use_x <- c(use_x, rev(use_x))
-			
-			polygon(x = use_x, y = c(
-	      sapply(X = head(use_x, length(use_x) / 2), FUN = function(x) {
-	        max(pm(x), rp(x))
-	      }),
-	      sapply(X = tail(use_x, length(use_x) / 2), FUN = function(x) {
-	        min(pm(x), rp(x))
-	      })
-	    ), col = if (idx == n) polygon_colors[fidx] else "#eeeeeef8", density = if (idx == n) 30 else 100, angle = if (idx == n) 20 else 0)
-		}
-	}
-	
-	for (idx in 1:n) {
-		rp <- get_smoothed_curve(seed = idx, npoints = 14, span = 0.35)
-		curve2(func = rp, from = 0, to = 1, lwd = if (idx == n) 2 else 1.25, add = TRUE, col = if (idx == n) "#444444" else "#bbbbbb")
-	}
-  
-  # Let's always over-draw the original proc:
-  for (fidx in 1:length(feat_seg)) {
-  	f <- names(feat_seg)[fidx]
-		a <- seg_starts[feat_seg[f]]
-		b <- a + seg_len
-		abline(v = c(a, b), lty = 5, col = "#dddddd")
-  }
-  curve2(pm, 0, 1, lwd = 3, col = "#FF4A36", add = TRUE)
-  grid()
+			abline(v = c(a, b), lty = 5, col = "#dddddd")
+	  }
+	  curve2(pm, 0, 1, lwd = 3, col = "#FF4A36", add = TRUE)
+	  grid()
+		
+	  legend(x = 0.44, y = use_ylim - .025, legend = c("Process Model", "Process", "Simulated Processes"), bg = "white", cex = cex, col = c("red", "#444444", "#bbbbbb"), lwd = c(2, 2, 1.25), lty = 1)
+	})
 }
 ```
 
@@ -419,8 +547,17 @@ In each epoch, a random process is drawn and the deviations against the process 
 
 
 ```{r ac-procs, fig.width=12, fig.height=7, fig.cap="The process of Automatic Calibration, where the process model \\textsf{REQ} and deviations are calibrated using random processes."}
-make_ac_plot(50)
+n <- 2
+paper <- FALSE
+eval(make_ac_plot())
 ```
+
+```{r}
+n <- 10
+paper <- TRUE
+saveTikzExpr(expr = make_ac_plot(), name = "ac-proc", height = 3.2, width = 1.15 * FIG_WIDTH)
+```
+
 
 Let's also make the summary of Figure \ref{fig:pdf-cdf-approx}.
 We will group each deviation's PDF and CDF into one plot and then show three to four rows of plots after some $n$ random processes.
@@ -428,57 +565,75 @@ The result is shown in Figure \ref{fig:pdf-cdf-approx-summary}.
 
 
 ```{r pdf-cdf-approx-summary, echo=FALSE, fig.width=11, fig.height=7, fig.cap="Summary of the PDF and CDF for the three features for samples sizes of $n=\\{10,20,50,10^4\\}$."}
-set.seed(1)
-use_n <- c(10, 20, 50, 10000)
-par(mfrow = c(length(use_n),3), mar = c(1,3,2,3))
-xlims <- list(
-	area = c(-0.01, 0.25),
-	corr = c(-1.1, 1.1),
-	jsd = c(2.5, 10))
-
-
-for (nidx in 1:length(use_n)) {
-	n <- use_n[nidx]
-	for (fidx in 1:length(feat_seg)) {
-		f <- names(sort(feat_seg))[fidx]
-		use_xlim <- xlims[[f]]
-		temp <- ac_features[ac_features$feat == f,][[paste0("seg_", feat_seg[f])]]
-		temp <- sample(x = temp, size = n, replace = FALSE)
-		if (f == "jsd") {
-			temp <- -log(temp)
-			f <- paste0("-log(", f, ")")
+make_pdf_cdf_summary <- function() {
+	rlang::expr({
+		set.seed(1)
+		use_n <- c(10, 20, 50, 10000)
+		par(mfrow = c(length(use_n),3), mar = c(1,2.5,2,2.5))
+		cex <- 0.9
+		xlims <- list(
+			area = c(-0.01, 0.25),
+			corr = c(-1.1, 1.1),
+			jsd = c(2.5, 10))
+		
+		
+		for (nidx in 1:length(use_n)) {
+			n <- use_n[nidx]
+			for (fidx in 1:length(feat_seg)) {
+				f <- names(sort(feat_seg))[fidx]
+				use_xlim <- xlims[[f]]
+				temp <- ac_features[ac_features$feat == f,][[paste0("seg_", feat_seg[f])]]
+				temp <- sample(x = temp, size = n, replace = FALSE)
+				if (f == "jsd") {
+					temp <- -log(temp)
+					f <- paste0("-log(", f, ")")
+				}
+				
+				use_bw <- bw.SJ(x = temp)
+				tempdens <- density(x = temp, bw = use_bw)
+				
+				if (nidx == length(use_n)) {
+					par(mar = c(2,2.5,2,2.5))
+				}
+				
+				plot.new()
+				plot.window(xlim = use_xlim, ylim = range(tempdens$y))
+				lines(x = tempdens$x, y = tempdens$y, lwd = 1.75)
+				axis(1, col.axis="black", cex.axis = cex)
+				#axis(1, col.axis="black", at = seq(from = use_xlim[1], to = use_xlim[2], by = (use_xlim[2] - use_xlim[1]) / 5), cex.axis = cex)
+				axis(2, col.axis="black", cex.axis = cex)
+				box()
+				
+				# CDF:
+				plot.window(xlim = use_xlim, ylim = c(0,1))
+				temp_kde_cdf <- Vectorize(function(x, h = tempdens$bw)  1 / length(temp) * sum(pnorm((x - temp) / h)))
+				lines(x = tempdens$x, y = temp_kde_cdf(tempdens$x), col="darkred", lwd = 2)
+				axis(4, col.axis="darkred", cex.axis = cex)
+				
+				if (nidx == 1) {
+					title(main = f, cex.main = cex)
+				}
+				grid()
+				#legend(x = use_xlim[1], y = 1, legend = c("A", "b"), bg = "white")
+				#mtext("1st y axis", side = 2, las=3, line=3)
+				#mtext("2nd y axis", side = 4, las=3, line=3, col="darkred")
+				
+				
+				
+				if (nidx == 1 && fidx == 1) {
+					legend(x = use_xlim[1], y = 1, legend = c("PDF", "CDF"), bg = "white", lwd = c(1.75, 2), col = c("black", "darkred"))
+				}
+			}
 		}
-		
-		use_bw <- bw.SJ(x = temp)
-		tempdens <- density(x = temp, bw = use_bw)
-		
-		if (nidx == length(use_n)) {
-			par(mar = c(2,3,2,3))
-		}
-		
-		plot.new()
-		plot.window(xlim=use_xlim, ylim=range(tempdens$y))
-		lines(x = tempdens$x, y = tempdens$y, lwd = 1.75)
-		axis(1, col.axis="black")
-		axis(2, col.axis="black")
-		box()
-		
-		# CDF:
-		plot.window(xlim=use_xlim, ylim=c(0,1))
-		temp_kde_cdf <- Vectorize(function(x, h = tempdens$bw)  1 / length(temp) * sum(pnorm((x - temp) / h)))
-		lines(x = tempdens$x, y = temp_kde_cdf(tempdens$x), col="darkred", lwd = 2)
-		axis(4, col.axis="darkred")
-		
-		if (nidx == 1) {
-			title(f)
-		}
-		grid()
-		#mtext("1st y axis", side = 2, las=3, line=3)
-		#mtext("2nd y axis", side = 4, las=3, line=3, col="darkred")
-	}
+	})
 }
+
+eval(make_pdf_cdf_summary())
 ```
 
+```{r}
+saveTikzExpr(expr = make_pdf_cdf_summary(), name = "ac-approx", width = 1.15 * FIG_WIDTH, height = 4.5)
+```
 
 
 
@@ -792,38 +947,55 @@ tempdf <- as.data.frame(model$importance)
 ```
 
 ```{r pm-vs-p, echo=FALSE, fig.width=10, fig.height=5, fig.cap="Correlation, Jensen--Shannon divergence, and area between for the process model (REQ) vs. a process."}
-plot.new()
-plot.window(xlim=c(0,1), ylim=c(0.2,1.8))
-axis(1)
-axis(2)
-mtext("Relative Project Time", side = 1, las=1, line=3)
-mtext("Relative Likelihood", side = 2, las=3, line=3)
-box()
-grid()
-
-tempf <- projects_it[[paste0("Project", use_pid)]]
-tempf_upper <- Vectorize(function(x) max(pm(x), tempf$REQ(x)))
-tempf_lower <- Vectorize(function(x) min(pm(x), tempf$REQ(x)))
-
-use_cols <- RColorBrewer::brewer.pal(12, "Set3")[c(4,5,7)]
-
-for (f in names(feat_seg)) {
-	a <- seg_starts[feat_seg[f]]
-	b <- a + seg_len
-	use_x <- seq(from = a, to = b, length.out = 20)
-	use_y <- c(tempf_upper(use_x), tempf_lower(rev(use_x)))
-	use_x <- c(use_x, rev(use_x))
-	rect(xleft = a, ytop = 2, xright = b, ybottom = 0, col = "#00000003")
-	polygon(x = use_x, y = use_y, density = 30, angle = 20, col = use_cols[feat_seg[f]])
+make_ps_vs_p <- function() {
+	rlang::expr({
+		par(mar = c(4.1, 3.6, 2.1, 1.1))
+		cex <- 0.9
+		cex.legend <- 0.85
+		use_ylim <- c(0.1, 1.8)
+		
+		plot.new()
+		plot.window(xlim = c(0,1), ylim = use_ylim)
+		title(main = "Three different deviations on three segments.", cex.main = cex)
+		axis(1, at = seq(0, 1, by = .1), cex.axis = cex)
+		axis(2, cex.axis = cex)
+		mtext("Relative Project Time", side = 1, las=1, line=2)
+		mtext("Relative Likelihood", side = 2, las=3, line=2)
+		box()
+		grid()
+		
+		tempf <- projects_it[[paste0("Project", use_pid)]]
+		tempf_upper <- Vectorize(function(x) max(pm(x), tempf$REQ(x)))
+		tempf_lower <- Vectorize(function(x) min(pm(x), tempf$REQ(x)))
+		
+		use_cols <- RColorBrewer::brewer.pal(12, "Set3")[c(5,7,4)]
+		
+		for (f in names(feat_seg)) {
+			a <- seg_starts[feat_seg[f]]
+			b <- a + seg_len
+			use_x <- seq(from = a, to = b, length.out = 20)
+			use_y <- c(tempf_upper(use_x), tempf_lower(rev(use_x)))
+			use_x <- c(use_x, rev(use_x))
+			rect(xleft = a, ytop = 3, xright = b, ybottom = 0, col = "#00000003", border = NA)
+			polygon(x = use_x, y = use_y, density = 30, angle = 20, col = use_cols[feat_seg[f]])
+		}
+		
+		curve2(func = pm, 0, 1, col = "red", lwd = 2, add = TRUE)
+		curve2(func = projects_it[[paste0("Project", use_pid)]]$REQ, 0, 1, lwd = 1.75, col = "#444444", add = TRUE)
+		abline(v = c(.1,.3,.4,.6,.7,.9), lty = 5, col = "#dddddd")
+		
+		
+		legend(x = 0.585, y = use_ylim[2], legend = c("Correlation", "Jensen--Shannon Divergence", "Area between"),
+					 angle = rep(20, 3), density = rep(30, 3), border = rep("#000000", 3), fill = use_cols[1:3], bg = "white", cex = cex.legend)
+		legend(x = -0.02, y = .45, legend = c("\\textsf{REQ} Process Model", "\\textsf{REQ} Process"), bg = "white", lwd = c(2, 1.75), col = c("red", "#444444"), cex = cex.legend)
+	})
 }
 
-curve2(func = pm, 0, 1, col = "red", lwd = 1.9, add = TRUE)
-curve2(func = projects_it[[paste0("Project", use_pid)]]$REQ, 0, 1, lwd = 1.5, add = TRUE)
-abline(v = c(.1,.3,.4,.6,.7,.9), lty = 5, col = "#dddddd")
+eval(make_ps_vs_p())
+```
 
-
-legend(x = 0.55, y = 1.8, legend = c("Correlation", "Jensen--Shannon Divergence", "Area between", "PM"),
-			 angle = c(rep(20, 3), 0), density = c(rep(30, 3), 0), lty = c(rep(NA, 3), 1), lwd = c(rep(NA, 3), 2), border = c(rep("#000000", 3), NA), fill = c(use_cols[1:3], NA), bg = "white", x.intersp = c(1,1,1,1), col = c(rep(NA, 3), "red"))
+```{r echo=FALSE, eval=FALSE}
+saveTikzExpr(expr = make_ps_vs_p(), name = "ac-raw-vs-scores", width = 1.15 * FIG_WIDTH, height = 3.2)
 ```
 
 Figure \ref{fig:pm-vs-p} shows an example of measuring the deviation between a process model and a process.
