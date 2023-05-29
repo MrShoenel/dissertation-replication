@@ -1,4 +1,4 @@
-# Replication Package for Dissertation: “Leveraging Evolutionary Changes for Software Process Quality”
+# Replication Package for Dissertation: “Leveraging Evolutionary Changes for Software Process Quality” [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.7981673.svg)](https://doi.org/10.5281/zenodo.7981673)
 
 This repository holds all the material and results for reproducing the
 tables, figures, and in-text results of my dissertation (Hönel 2023).
