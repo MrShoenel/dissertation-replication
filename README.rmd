@@ -17,7 +17,8 @@ In this repository, you will find:
 
 * [__Notebooks__ (R)](./notebooks) - Notebooks that can be (re-)run by users to reproduce the results. All results are included, such that the notebooks will only recompute them if you delete them. The notebooks are very detailed and document all steps necessary.
     * [__Replication Package for All Results, Figures, and Tables__](./notebooks/Replication.md) - The primary notebook of this repository.
-* [__Results__ (RDS)](./results) - All data required for reproduction is included. All the results, too. Some of these may take a long time to compute, so be aware.
+* [__Data__ (CSV, XLSX, RDS)](./data) - All data required for reproduction is included.
+* [__Results__ (RDS)](./results) - All pre-computed results required for reproduction are included. Some of these may take a long time to compute, so be aware.
 
 
 # References {-}

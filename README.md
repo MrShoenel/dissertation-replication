@@ -12,8 +12,10 @@ In this repository, you will find:
   - [**Replication Package for All Results, Figures, and
     Tables**](./notebooks/Replication.md) - The primary notebook of this
     repository.
-- [**Results** (RDS)](./results) - All data required for reproduction is
-  included. All the results, too. Some of these may take a long time to
+- [**Data** (CSV, XLSX, RDS)](./data) - All data required for
+  reproduction is included.
+- [**Results** (RDS)](./results) - All pre-computed results required for
+  reproduction are included. Some of these may take a long time to
   compute, so be aware.
 
 # References
