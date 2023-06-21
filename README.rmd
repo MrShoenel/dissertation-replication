@@ -8,7 +8,7 @@ output:
     variant: gfm
 ---
 
-# Replication Package for Dissertation: "Leveraging Evolutionary Changes for Software Process Quality" [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.7981673.svg)](https://doi.org/10.5281/zenodo.7981673) [![arXiv](https://img.shields.io/badge/arXiv-2305.18061-b31b1b.svg?style=flat)](https://arxiv.org/abs/2305.18061)
+# Replication Package for Dissertation: "Quantifying Process Quality: The Role of Effective Organizational Learning in Software Evolution" [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.7981673.svg)](https://doi.org/10.5281/zenodo.7981673) [![arXiv](https://img.shields.io/badge/arXiv-2305.18061-b31b1b.svg?style=flat)](https://arxiv.org/abs/2305.18061)
 
 This repository holds all the material and results for reproducing the tables, figures, and in-text results of my dissertation [@honel2023_phdthesis].
 
