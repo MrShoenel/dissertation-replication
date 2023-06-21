@@ -24,9 +24,10 @@ In this repository, you will find:
 
 <div id="ref-honel2023_phdthesis" class="csl-entry">
 
-Hönel, Sebastian. 2023. “<span class="nocase">Leveraging Evolutionary
-Changes for Software Process Quality</span>.” *CoRR*. PhD thesis,
-Linnaeus University. <https://doi.org/10.48550/arXiv.2305.18061>.
+Hönel, Sebastian. 2023. “<span class="nocase">Quantifying Process
+Quality: The Role of Effective Organizational Learning in Software
+Evolution</span>.” *CoRR*. PhD thesis, Linnaeus University.
+<https://doi.org/10.48550/arXiv.2305.18061>.
 
 </div>
 
